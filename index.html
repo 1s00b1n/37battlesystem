@@ -410,6 +410,10 @@
             return;
         }
 
+        // [수정됨] 현재 활성화된 에너미와 아군 목록을 실시간으로 생성
+        const currentEnemies = enemyData.filter(e => activeEnemyIds.has(e.id)).map(e => e.name);
+        const currentAllies = characterData.filter(c => activeCharIds.has(c.id)).map(c => c.name);
+
         characterData.forEach(char => {
             if(activeCharIds.has(char.id)) {
                 const row = document.createElement('div');
@@ -419,14 +423,19 @@
                 // 포지션별 행동 정의
                 let mainAction = "공격";
                 let skill1 = "강타", skill2 = "참격";
-                let targetList = monsterTargets;
+                let targetList = [];
 
+                // [수정됨] 역할에 따라 현재 활성화된 대상 리스트 할당
                 if (char.role === "탱커") {
                     mainAction = "방어"; skill1 = "수호"; skill2 = "철벽";
-                    targetList = allyTargets;
+                    targetList = currentAllies; // 아군 대상 (출전 중인 캐릭터)
                 } else if (char.role === "서포터") {
                     mainAction = "치유"; skill1 = "재정비"; skill2 = "불굴";
-                    targetList = allyTargets;
+                    targetList = currentAllies; // 아군 대상 (출전 중인 캐릭터)
+                } else {
+                    // 딜러일 경우
+                    mainAction = "공격"; skill1 = "강타"; skill2 = "참격";
+                    targetList = currentEnemies; // 적 대상 (출현 중인 에너미)
                 }
 
                 // 행동 옵션
@@ -439,11 +448,19 @@
                     { val: 'luck', txt: '행운 판정', rate: 0 }
                 ];
                 
-                // 타겟 옵션
-                const targetOpts = targetList.map(t => ({ val: 'target', txt: t }));
+                // [수정됨] 타겟 옵션 생성 (대상이 없을 경우 '없음' 처리)
+                let targetOpts;
+                let initialTargetTxt = '대상 선택';
+
+                if (targetList.length > 0) {
+                    targetOpts = targetList.map(t => ({ val: 'target', txt: t }));
+                } else {
+                    targetOpts = [{ val: 'none', txt: '(대상 없음)' }];
+                    initialTargetTxt = '(대상 없음)';
+                }
 
                 const actDropdown = createDropdown(actionOpts, 'main', `${mainAction} (기본)`);
-                const tgtDropdown = createDropdown(targetOpts, 'target', '대상 선택');
+                const tgtDropdown = createDropdown(targetOpts, 'target', initialTargetTxt);
 
                 // 스탯 텍스트
                 let statName = (char.role === '딜러') ? '공격' : (char.role === '탱커' ? '방어' : '치유');
