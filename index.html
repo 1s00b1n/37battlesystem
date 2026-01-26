@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRPG 전투 시스템</title>
+    <style>
+        :root {
+            --primary: #32afc7;
+            --primary-dark: #2a93a8;
+            --bg-color: #f0f4f8;
+            --card-bg: #ffffff;
+            --text-main: #333333;
+            --text-sub: #666666;
+            --border-radius: 16px;
+            --btn-radius: 8px;
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            --shadow-hover: 0 6px 16px rgba(50, 175, 199, 0.15);
+        }
+
+        * { box-sizing: border-box; }
+
+        body { 
+            font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; 
+            padding: 40px 20px; 
+            background-color: var(--bg-color); 
+            color: var(--text-main); 
+            line-height: 1.5;
+        }
+
+        .container { max-width: 1000px; margin: 0 auto; }
+        
+        /* 섹션 스타일 */
+        section {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 30px;
+            margin-bottom: 40px;
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(0,0,0,0.03);
+        }
+
+        h2 {
+            font-size: 20px; font-weight: 800; margin: 0 0 20px 0;
+            color: var(--text-main);
+            display: flex; align-items: center;
+        }
+        
+        /* 섹션 번호 뱃지 */
+        .step-badge {
+            background: var(--primary); color: #fff;
+            padding: 4px 12px; border-radius: 20px;
+            font-size: 14px; margin-right: 10px;
+        }
+
+        h3 { 
+            font-size: 15px; font-weight: 700; margin: 25px 0 10px 0; color: var(--text-sub); 
+            padding-left: 5px; border-left: 4px solid var(--primary); line-height: 1;
+        }
+
+        /* --- 1. 전투 준비 (그리드 레이아웃) --- */
+        .prep-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 30px;
+        }
+        @media (max-width: 768px) { .prep-grid { grid-template-columns: 1fr; } }
+
+        .pool-box {
+            background: #fafafa;
+            border-radius: 12px;
+            padding: 15px;
+            border: 1px solid #eee;
+        }
+
+        .category-header {
+            text-align: left; font-weight: 700; font-size: 13px; color: #888;
+            margin-bottom: 10px; display: block;
+        }
+
+        /* 칩(Chip) 스타일 리스트 아이템 */
+        .chip-list {
+            display: flex; flex-wrap: wrap; gap: 8px;
+        }
+        .chip {
+            background: #fff; border: 1px solid #ddd;
+            padding: 8px 12px; border-radius: 20px;
+            font-size: 13px; cursor: pointer; transition: 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+            user-select: none;
+        }
+        .chip:hover {
+            border-color: var(--primary); color: var(--primary);
+            transform: translateY(-2px);
+        }
+        .chip.disabled { opacity: 0.4; pointer-events: none; }
+
+        /* 선택된 목록 (출전/대기실) */
+        .deployed-list {
+            min-height: 60px;
+            background: #fff; border: 2px dashed #ddd;
+            border-radius: 12px; padding: 10px;
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        .deployed-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 15px; background: #f9fbfd;
+            border-radius: 10px; border: 1px solid #eef3f5;
+        }
+        .deployed-item span { font-weight: 600; font-size: 14px; }
+        
+        .btn-delete {
+            background: #ffeff0; color: #d63031; border: none;
+            padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700;
+            cursor: pointer; transition: 0.2s;
+        }
+        .btn-delete:hover { background: #ffdadb; }
+
+        .empty-text {
+            text-align: center; color: #bbb; font-size: 13px; padding: 20px;
+        }
+
+        /* --- 2 & 3. 행동 섹션 (Row 스타일) --- */
+        .action-row {
+            display: flex; align-items: center; gap: 15px;
+            padding: 15px; background: #fff;
+            border: 1px solid #eee; border-radius: 12px;
+            margin-bottom: 10px;
+            transition: 0.2s;
+        }
+        .action-row:hover { border-color: var(--primary); box-shadow: var(--shadow-hover); }
+
+        .name-col { width: 15%; font-weight: 700; font-size: 15px; }
+        .action-col { width: 35%; display: flex; gap: 5px; }
+        .info-col { 
+            width: 50%; font-size: 13px; color: #666; text-align: center; 
+            background: #f7f9fa; padding: 6px; border-radius: 8px;
+        }
+
+        /* --- 커스텀 드롭다운 --- */
+        .custom-select { position: relative; width: 100%; min-width: 120px; font-size: 13px; }
+        .select-trigger {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 12px; background: #fff; border: 1px solid #ddd;
+            border-radius: var(--btn-radius); cursor: pointer; transition: 0.2s;
+        }
+        .select-trigger:hover { border-color: var(--primary); color: var(--primary); }
+        .arrow {
+            width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent;
+            border-top: 5px solid #888; transition: 0.2s;
+        }
+        .custom-select.open .arrow { transform: rotate(180deg); border-top-color: var(--primary); }
+        
+        .select-options {
+            position: absolute; top: 110%; left: 0; right: 0;
+            background: #fff; border: 1px solid #ddd; border-radius: var(--btn-radius);
+            z-index: 100; display: none; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            max-height: 220px; overflow-y: auto; overflow-x: hidden;
+        }
+        .custom-select.open .select-options { display: block; animation: fadeIn 0.1s ease; }
+        .select-option { padding: 10px; cursor: pointer; transition: 0.1s; }
+        .select-option:hover { background: #f0f8ff; color: var(--primary); }
+        .select-option.divider { border-top: 1px solid #eee; margin-top: 2px; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* --- 하단 컨트롤 패널 --- */
+        .control-panel { margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
+        
+        .btn-main {
+            width: 100%; padding: 14px;
+            background: var(--text-main); color: #fff; border: none;
+            border-radius: var(--border-radius); font-size: 16px; font-weight: 700;
+            cursor: pointer; transition: 0.2s;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+        .btn-main:hover { background: var(--primary); transform: translateY(-2px); }
+
+        .btn-copy {
+            width: 100%; padding: 10px;
+            background: #fff; border: 1px solid #ddd; color: #555;
+            border-radius: var(--border-radius); font-weight: 600; cursor: pointer; transition: 0.2s;
+        }
+        .btn-copy:hover { border-color: var(--text-main); color: var(--text-main); }
+
+        textarea {
+            width: 100%; height: 100px; padding: 15px;
+            border: 1px solid #ddd; border-radius: var(--border-radius);
+            font-size: 14px; font-family: monospace; resize: vertical;
+            background: #fafafa; outline: none; transition: 0.2s;
+        }
+        textarea:focus { border-color: var(--primary); background: #fff; }
+
+    </style>
+</head>
+<body>
+
+<div class="container">
+    
+    <section>
+        <h2><span class="step-badge">STEP 0</span> 전투 준비</h2>
+        
+        <div class="prep-grid">
+            <div>
+                <h3>캐릭터 목록 (Available)</h3>
+                <div class="pool-box">
+                    <span class="category-header">딜러</span>
+                    <div id="poolDealer" class="chip-list"></div>
+                    
+                    <span class="category-header" style="margin-top:15px">탱커</span>
+                    <div id="poolTanker" class="chip-list"></div>
+                    
+                    <span class="category-header" style="margin-top:15px">서포터</span>
+                    <div id="poolSupporter" class="chip-list"></div>
+                </div>
+
+                <h3>출전 인원 (Deployed)</h3>
+                <div id="deployedCharList" class="deployed-list">
+                    <div class="empty-text">목록에서 인물을 클릭하여 추가하세요.</div>
+                </div>
+            </div>
+
+            <div>
+                <h3>에너미 목록 (Available)</h3>
+                <div class="pool-box">
+                    <div id="poolEnemy" class="chip-list"></div>
+                </div>
+
+                <h3>출현 에너미 (Active)</h3>
+                <div id="deployedEnemyList" class="deployed-list">
+                    <div class="empty-text">목록에서 에너미를 클릭하여 추가하세요.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2><span class="step-badge">STEP 1</span> 괴수 행동</h2>
+        <div id="activeEnemyActionList">
+            <div class="empty-text" style="padding:40px">활성화된 에너미가 없습니다.</div>
+        </div>
+
+        <div class="control-panel">
+            <button class="btn-main" onclick="enemyAction()">에너미 행동 실행 (무작위 타겟)</button>
+            <textarea id="enemyResultArea" readonly placeholder="결과 출력..."></textarea>
+            <button class="btn-copy" onclick="copyToClipboard('enemyResultArea')">결과 복사</button>
+        </div>
+    </section>
+
+    <section>
+        <h2><span class="step-badge">STEP 2</span> 캐릭터 대응</h2>
+        <div id="activeCharActionList">
+            <div class="empty-text" style="padding:40px">출전 중인 캐릭터가 없습니다.</div>
+        </div>
+
+        <div class="control-panel">
+            <button class="btn-main" onclick="characterAction()">캐릭터 대응 실행</button>
+            <textarea id="charResultArea" readonly placeholder="결과 출력..."></textarea>
+            <button class="btn-copy" onclick="copyToClipboard('charResultArea')">결과 복사</button>
+        </div>
+    </section>
+
+</div>
+
+<script>
+    // --- 데이터 ---
+    const enemyData = [
+        { id: 'e1', name: '괴수1', hp: 1000 },
+        { id: 'e2', name: '괴수2', hp: 1000 },
+        { id: 'e3', name: '괴수3', hp: 1000 },
+        { id: 'mb', name: '중간보스', hp: 4500 },
+        { id: 'fb', name: '최종보스', hp: 4500 }
+    ];
+
+    const characterData = [
+        { id: 1, name: "인물1", role: "딜러", hp: 1000, cost: 5, stat: 5, obs: 4, luck: 2 },
+        { id: 2, name: "인물2", role: "탱커", hp: 1000, cost: 5, stat: 4, obs: 3, luck: 5 },
+        { id: 3, name: "인물3", role: "서포터", hp: 1000, cost: 5, stat: 4, obs: 5, luck: 3 },
+        { id: 4, name: "인물4", role: "딜러", hp: 1000, cost: 5, stat: 5, obs: 4, luck: 2 },
+        { id: 5, name: "인물5", role: "탱커", hp: 1000, cost: 5, stat: 4, obs: 3, luck: 5 },
+        { id: 6, name: "인물6", role: "서포터", hp: 1000, cost: 5, stat: 4, obs: 5, luck: 3 },
+        { id: 7, name: "인물7", role: "딜러", hp: 1000, cost: 5, stat: 5, obs: 4, luck: 2 },
+        { id: 8, name: "인물8", role: "탱커", hp: 1000, cost: 5, stat: 4, obs: 3, luck: 5 },
+        { id: 9, name: "인물9", role: "서포터", hp: 1000, cost: 5, stat: 4, obs: 5, luck: 3 }
+    ];
+
+    const monsterTargets = ["괴수1", "괴수2", "괴수3", "중간보스", "최종보스"];
+    const allyTargets = characterData.map(c => c.name);
+
+    // --- 상태 ---
+    const activeEnemyIds = new Set();
+    const activeCharIds = new Set();
+
+    // --- DOM 요소 ---
+    // STEP 1
+    const poolDealer = document.getElementById('poolDealer');
+    const poolTanker = document.getElementById('poolTanker');
+    const poolSupporter = document.getElementById('poolSupporter');
+    const deployedCharList = document.getElementById('deployedCharList');
+
+    const poolEnemy = document.getElementById('poolEnemy');
+    const deployedEnemyList = document.getElementById('deployedEnemyList');
+
+    // STEP 2 & 3
+    const activeEnemyActionList = document.getElementById('activeEnemyActionList');
+    const activeCharActionList = document.getElementById('activeCharActionList');
+
+    // --- 렌더링 함수 ---
+    function renderAll() {
+        renderPrepSection();
+        renderEnemyActionSection();
+        renderCharActionSection();
+    }
+
+    function renderPrepSection() {
+        // 1. 캐릭터 풀 (Available)
+        poolDealer.innerHTML = ''; poolTanker.innerHTML = ''; poolSupporter.innerHTML = '';
+        characterData.forEach(char => {
+            if(!activeCharIds.has(char.id)) {
+                const chip = document.createElement('div');
+                chip.className = 'chip';
+                chip.textContent = char.name;
+                chip.onclick = () => { activeCharIds.add(char.id); renderAll(); };
+                
+                if(char.role === '딜러') poolDealer.appendChild(chip);
+                else if(char.role === '탱커') poolTanker.appendChild(chip);
+                else poolSupporter.appendChild(chip);
+            }
+        });
+
+        // 2. 캐릭터 출전 (Deployed) - 삭제 버튼 포함
+        deployedCharList.innerHTML = '';
+        if(activeCharIds.size === 0) deployedCharList.innerHTML = '<div class="empty-text">목록에서 인물을 클릭하여 추가하세요.</div>';
+        
+        characterData.forEach(char => {
+            if(activeCharIds.has(char.id)) {
+                const row = document.createElement('div');
+                row.className = 'deployed-item';
+                row.innerHTML = `
+                    <span>${char.name}</span>
+                    <button class="btn-delete" onclick="removeChar(${char.id})">삭제</button>
+                `;
+                deployedCharList.appendChild(row);
+            }
+        });
+
+        // 3. 에너미 풀 (Available)
+        poolEnemy.innerHTML = '';
+        enemyData.forEach(enemy => {
+            if(!activeEnemyIds.has(enemy.id)) {
+                const chip = document.createElement('div');
+                chip.className = 'chip';
+                chip.textContent = enemy.name;
+                chip.onclick = () => { activeEnemyIds.add(enemy.id); renderAll(); };
+                poolEnemy.appendChild(chip);
+            }
+        });
+
+        // 4. 에너미 출현 (Deployed) - 삭제 버튼 포함
+        deployedEnemyList.innerHTML = '';
+        if(activeEnemyIds.size === 0) deployedEnemyList.innerHTML = '<div class="empty-text">목록에서 에너미를 클릭하여 추가하세요.</div>';
+
+        enemyData.forEach(enemy => {
+            if(activeEnemyIds.has(enemy.id)) {
+                const row = document.createElement('div');
+                row.className = 'deployed-item';
+                row.innerHTML = `
+                    <span>${enemy.name}</span>
+                    <button class="btn-delete" onclick="removeEnemy('${enemy.id}')">삭제</button>
+                `;
+                deployedEnemyList.appendChild(row);
+            }
+        });
+    }
+
+    function removeChar(id) { activeCharIds.delete(id); renderAll(); }
+    function removeEnemy(id) { activeEnemyIds.delete(id); renderAll(); }
+
+
+    function renderEnemyActionSection() {
+        activeEnemyActionList.innerHTML = '';
+        if(activeEnemyIds.size === 0) {
+            activeEnemyActionList.innerHTML = '<div class="empty-text" style="padding:40px">활성화된 에너미가 없습니다.</div>';
+            return;
+        }
+
+        enemyData.forEach(enemy => {
+            if(activeEnemyIds.has(enemy.id)) {
+                const row = document.createElement('div');
+                row.className = 'action-row';
+                row.dataset.id = enemy.id;
+
+                const dropdown = createDropdown([
+                    { val: 'act1', txt: '행동1' },
+                    { val: 'act2', txt: '행동2' }
+                ], 'act1', '행동1');
+
+                row.innerHTML = `
+                    <div class="name-col">${enemy.name}</div>
+                    <div class="action-col">${dropdown}</div>
+                    <div class="info-col">HP: ${enemy.hp}</div>
+                `;
+                activeEnemyActionList.appendChild(row);
+            }
+        });
+    }
+
+    function renderCharActionSection() {
+        activeCharActionList.innerHTML = '';
+        if(activeCharIds.size === 0) {
+            activeCharActionList.innerHTML = '<div class="empty-text" style="padding:40px">출전 중인 캐릭터가 없습니다.</div>';
+            return;
+        }
+
+        characterData.forEach(char => {
+            if(activeCharIds.has(char.id)) {
+                const row = document.createElement('div');
+                row.className = 'action-row';
+                row.dataset.id = char.id;
+
+                // 포지션별 행동 정의
+                let mainAction = "공격";
+                let skill1 = "강타", skill2 = "참격";
+                let targetList = monsterTargets;
+
+                if (char.role === "탱커") {
+                    mainAction = "방어"; skill1 = "수호"; skill2 = "철벽";
+                    targetList = allyTargets;
+                } else if (char.role === "서포터") {
+                    mainAction = "치유"; skill1 = "재정비"; skill2 = "불굴";
+                    targetList = allyTargets;
+                }
+
+                // 행동 옵션
+                const actionOpts = [
+                    { val: 'main', txt: `${mainAction} (기본)`, rate: 1 },
+                    { val: 'skill1', txt: `${skill1} (x1.5)`, rate: 1.5 },
+                    { val: 'skill2', txt: `${skill2} (x2.0)`, rate: 2.0 },
+                    { val: 'divider', txt: '---' },
+                    { val: 'obs', txt: '관찰 판정', rate: 0 },
+                    { val: 'luck', txt: '행운 판정', rate: 0 }
+                ];
+                
+                // 타겟 옵션
+                const targetOpts = targetList.map(t => ({ val: 'target', txt: t }));
+
+                const actDropdown = createDropdown(actionOpts, 'main', `${mainAction} (기본)`);
+                const tgtDropdown = createDropdown(targetOpts, 'target', '대상 선택');
+
+                // 스탯 텍스트
+                let statName = (char.role === '딜러') ? '공격' : (char.role === '탱커' ? '방어' : '치유');
+                const statText = `HP:${char.hp} / Cost:${char.cost} / ${statName}:${char.stat} / 관찰:${char.obs} / 행운:${char.luck}`;
+
+                row.innerHTML = `
+                    <div class="name-col">${char.name}</div>
+                    <div class="action-col" style="flex-grow:1">
+                        ${actDropdown}
+                        ${tgtDropdown}
+                    </div>
+                    <div class="info-col" title="${statText}">${statText}</div>
+                `;
+                activeCharActionList.appendChild(row);
+            }
+        });
+    }
+
+    // --- 드롭다운 생성 헬퍼 ---
+    function createDropdown(options, initialVal, initialText) {
+        let optsHtml = '';
+        options.forEach(opt => {
+            if(opt.val === 'divider') {
+                optsHtml += `<div class="select-option divider"></div>`;
+            } else {
+                optsHtml += `<div class="select-option" onclick="selectOption(this, '${opt.val}', ${opt.rate || 0}, '${opt.txt}', event)">${opt.txt}</div>`;
+            }
+        });
+
+        return `
+            <div class="custom-select" onclick="toggleSelect(this, event)">
+                <div class="select-trigger" data-value="${initialVal}" data-rate="1">
+                    <span>${initialText}</span><div class="arrow"></div>
+                </div>
+                <div class="select-options">${optsHtml}</div>
+            </div>
+        `;
+    }
+
+    // --- 이벤트 핸들러 ---
+    function toggleSelect(el, e) {
+        document.querySelectorAll('.custom-select').forEach(x => { if(x !== el) x.classList.remove('open'); });
+        document.querySelectorAll('.action-row').forEach(row => row.style.zIndex = 'auto'); // z-index reset
+        
+        if(!el.classList.contains('open')) {
+            el.classList.add('open');
+            el.closest('.action-row').style.zIndex = '1000'; // Bring to front
+        } else {
+            el.classList.remove('open');
+        }
+        e.stopPropagation();
+    }
+
+    function selectOption(el, val, rate, txt, e) {
+        const wrapper = el.closest('.custom-select');
+        const trigger = wrapper.querySelector('.select-trigger');
+        trigger.dataset.value = val;
+        trigger.dataset.rate = rate;
+        trigger.querySelector('span').innerText = txt;
+        
+        wrapper.classList.remove('open');
+        wrapper.closest('.action-row').style.zIndex = 'auto';
+        e.stopPropagation();
+    }
+
+    window.onclick = () => {
+        document.querySelectorAll('.custom-select').forEach(x => x.classList.remove('open'));
+        document.querySelectorAll('.action-row').forEach(row => row.style.zIndex = 'auto');
+    }
+
+    // --- 실행 로직 ---
+    function enemyAction() {
+        if(activeEnemyIds.size === 0) return alert('에너미가 없습니다.');
+        if(activeCharIds.size === 0) return alert('타겟이 없습니다.');
+        
+        const chars = characterData.filter(c => activeCharIds.has(c.id));
+        let result = "";
+        
+        activeEnemyActionList.querySelectorAll('.action-row').forEach(row => {
+            const id = row.dataset.id;
+            const enemy = enemyData.find(e => e.id === id);
+            const actVal = row.querySelector('.select-trigger').dataset.value;
+            const actName = (actVal === 'act1') ? '행동1' : '행동2';
+            
+            const target = chars[Math.floor(Math.random() * chars.length)];
+            result += `[${enemy.name}>${target.name}] ${actName}\n`;
+        });
+        document.getElementById('enemyResultArea').value = result;
+    }
+
+    function characterAction() {
+        if(activeCharIds.size === 0) return;
+        let result = "";
+
+        activeCharActionList.querySelectorAll('.action-row').forEach(row => {
+            const id = parseInt(row.dataset.id);
+            const char = characterData.find(c => c.id === id);
+            const triggers = row.querySelectorAll('.select-trigger');
+            
+            const actType = triggers[0].dataset.value;
+            const rate = parseFloat(triggers[0].dataset.rate);
+            
+            if(actType === 'obs') {
+                const dice = Math.floor(Math.random() * 5) + 1;
+                result += `${char.name} 관찰 ${(dice <= char.obs) ? "성공" : "실패"} (${dice}/${char.obs})\n`;
+            } else if(actType === 'luck') {
+                const dice = Math.floor(Math.random() * 5) + 1;
+                result += `${char.name} 행운 ${(dice <= char.luck) ? "성공" : "실패"} (${dice}/${char.luck})\n`;
+            } else {
+                const val = Math.round(char.stat * (Math.floor(Math.random() * 100) + 1) * rate);
+                const label = char.role === "딜러" ? "공격값" : (char.role === "탱커" ? "방어값" : "치유값");
+                result += `${char.name} ${label} ${val}\n`;
+            }
+        });
+        document.getElementById('charResultArea').value = result;
+    }
+
+    function copyToClipboard(id) {
+        const el = document.getElementById(id);
+        if(!el.value) return;
+        el.select(); document.execCommand('copy'); alert('복사되었습니다.');
+    }
+
+    // 초기 실행
+    renderAll();
+
+</script>
+
+</body>
+</html>
