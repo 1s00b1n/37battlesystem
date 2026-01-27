@@ -195,6 +195,10 @@
 
 <div class="container">
     
+    <div style="text-align:right; margin-bottom:10px;">
+    <button class="btn-copy" onclick="loadFromSheet()">📥 시트 불러오기</button>
+    </div>
+
     <section>
         <h2><span class="step-badge">STEP 0</span> 전투 준비</h2>
         
@@ -265,27 +269,114 @@
 </div>
 
 <script>
-    // --- 데이터 ---
-    const enemyData = [
-        { id: 'e1', name: '괴수1', hp: 1000, minAtk: 50, maxAtk: 200 },
-        { id: 'e2', name: '괴수2', hp: 1000, minAtk: 50, maxAtk: 200 },
-        { id: 'e3', name: '괴수3', hp: 1000, minAtk: 50, maxAtk: 200 },
-        { id: 'mb', name: '중간보스', hp: 4500, minAtk: 200, maxAtk: 500 },
-        { id: 'fb', name: '최종보스', hp: 4500, minAtk: 500, maxAtk: 1000 }
-    ];
 
-    const characterData = [
-        { id: 1, name: "인물1", role: "딜러", hp: 1000, cost: 5, stat: 5, obs: 4, luck: 2 },
-        { id: 2, name: "인물2", role: "탱커", hp: 1000, cost: 5, stat: 4, obs: 3, luck: 5 },
-        { id: 3, name: "인물3", role: "서포터", hp: 1000, cost: 5, stat: 4, obs: 5, luck: 3 },
-        { id: 4, name: "인물4", role: "딜러", hp: 1000, cost: 5, stat: 5, obs: 4, luck: 2 },
-        { id: 5, name: "인물5", role: "탱커", hp: 1000, cost: 5, stat: 4, obs: 3, luck: 5 },
-        { id: 6, name: "인물6", role: "서포터", hp: 1000, cost: 5, stat: 4, obs: 5, luck: 3 },
-        { id: 7, name: "인물7", role: "딜러", hp: 1000, cost: 5, stat: 5, obs: 4, luck: 2 },
-        { id: 8, name: "인물8", role: "탱커", hp: 1000, cost: 5, stat: 4, obs: 3, luck: 5 },
-        { id: 9, name: "인물9", role: "서포터", hp: 1000, cost: 5, stat: 4, obs: 5, luck: 3 }
-    ];
+    // [수정 1] 배포한 GAS 웹 앱 URL을 여기에 붙여넣으세요.
+const SHEET_API_URL = "여기에_복사한_URL_입력";
 
+// [수정 2] 기존 데이터 변수를 let으로 변경 (덮어쓰기 위해)
+let characterData = []; 
+let enemyData = [];
+
+// [신규 기능] 시트 불러오기
+async function loadFromSheet() {
+    if(!confirm("스프레드시트 데이터를 불러오시겠습니까? 현재 진행 상황은 초기화됩니다.")) return;
+    
+    try {
+        const res = await fetch(SHEET_API_URL);
+        const data = await res.json();
+        
+        characterData = data.characters;
+        enemyData = data.enemies;
+        
+        // 데이터 로드 후 초기화 및 재렌더링
+        activeCharIds.clear();
+        activeEnemyIds.clear();
+        activeDoTs = [];
+        pendingCostUpdates = {};
+        
+        renderAll();
+        alert("데이터 로드 완료!");
+        
+    } catch (e) {
+        console.error(e);
+        alert("데이터를 불러오는 중 오류가 발생했습니다.");
+    }
+}
+
+// [수정 3] 라운드 결과 저장 함수에 시트 전송 기능 추가
+async function saveRoundResult() {
+    if (!pendingRoundUpdates) {
+        alert("저장할 결과가 없습니다.");
+        return;
+    }
+
+    // --- 기존 로직 (로컬 데이터 갱신) 시작 ---
+    // 1. 캐릭터 체력 및 코스트 갱신
+    for (const [idStr, newHp] of Object.entries(pendingRoundUpdates.chars)) {
+        const id = parseInt(idStr);
+        const char = characterData.find(c => c.id === id);
+        if(char) {
+            char.hp = newHp;
+            if (char.hp <= 0) activeCharIds.delete(id);
+        }
+    }
+    
+    // 코스트 적용
+    for (const [idStr, costChange] of Object.entries(pendingCostUpdates)) {
+        const id = parseInt(idStr);
+        const char = characterData.find(c => c.id === id);
+        if(char) {
+            char.cost += costChange;
+            if (char.cost < 0) char.cost = 0; 
+        }
+    }
+
+    // 2. 에너미 체력 갱신
+    for (const [id, dmg] of Object.entries(pendingRoundUpdates.enemies)) {
+        const enemy = enemyData.find(e => e.id === id);
+        if(enemy) {
+            enemy.hp = Math.max(0, enemy.hp - dmg);
+            if (enemy.hp <= 0) activeEnemyIds.delete(id);
+        }
+    }
+
+    // 3. 지속 피해(DoT) 갱신
+    activeDoTs.push(...pendingDoTAdds);
+    activeDoTs.forEach(dot => dot.turns -= 1);
+    activeDoTs = activeDoTs.filter(dot => dot.turns > 0);
+
+    // 4. 초기화 및 UI 갱신
+    pendingRoundUpdates = null;
+    pendingCostUpdates = {};
+    pendingDoTAdds = [];
+    pendingAttacks = [];
+    
+    renderAll();
+    
+    document.getElementById('enemyResultArea').value = "";
+    document.getElementById('charResultArea').value = "저장 완료! 시트에 동기화 중...";
+    // --- 기존 로직 끝 ---
+
+    // [추가된 로직] 변경된 데이터를 시트로 전송
+    try {
+        const payload = {
+            characters: characterData,
+            enemies: enemyData
+        };
+        
+        await fetch(SHEET_API_URL, {
+            method: 'POST',
+            body: JSON.stringify(payload) // 'no-cors' 모드를 쓰면 안 됨 (응답 확인 불가)
+        });
+        
+        alert("로컬 저장 및 스프레드시트 동기화 완료!");
+        document.getElementById('charResultArea').value = "모든 저장 완료.";
+        
+    } catch (e) {
+        console.error(e);
+        alert("시트 저장 중 오류 발생 (로컬 데이터는 저장됨)");
+    }
+}
     // --- 상태 ---
     const activeEnemyIds = new Set();
     const activeCharIds = new Set();
