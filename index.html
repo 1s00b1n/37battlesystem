@@ -291,6 +291,9 @@
     const activeCharIds = new Set();
     let pendingAttacks = []; // 에너미 공격 데이터
     let pendingRoundUpdates = null; // 라운드 결과(HP) 임시 저장
+    let pendingCostUpdates = {}; // 코스트 변경 임시 저장
+    let activeDoTs = []; // { enemyId, damage, turns }
+    let pendingDoTAdds = []; // 신규 추가될 DoT
 
     // --- DOM 요소 ---
     const poolDealer = document.getElementById('poolDealer');
@@ -418,29 +421,50 @@
                 row.dataset.id = char.id;
 
                 let mainAction = "공격";
-                let skill1 = "강타", skill2 = "참격";
+                let skill1 = "강타", skill2 = "참격", skill3 = "지속 피해";
                 let targetList = [];
 
+                // 기본 행동 정의
+                let actionOpts = [];
+
                 if (char.role === "탱커") {
-                    mainAction = "방어"; skill1 = "수호"; skill2 = "철벽";
+                    mainAction = "방어"; skill1 = "수호"; skill2 = "철벽"; skill3 = "무적";
                     targetList = currentAllies;
+                    actionOpts = [
+                        { val: 'main', txt: `${mainAction} (기본)`, rate: 1, cost: 0 },
+                        { val: 'skill1', txt: `${skill1} (2)`, rate: 1.5, cost: 2 },
+                        { val: 'skill2', txt: `${skill2} (3)`, rate: 2.0, cost: 3 },
+                        { val: 'skill3', txt: `${skill3} (4)`, rate: 0, cost: 4 },
+                        { val: 'divider', txt: '---' },
+                        { val: 'obs', txt: '관찰 판정', rate: 0, cost: 0 },
+                        { val: 'luck', txt: '행운 판정', rate: 0, cost: 0 }
+                    ];
                 } else if (char.role === "서포터") {
-                    mainAction = "치유"; skill1 = "재정비"; skill2 = "불굴";
+                    mainAction = "치유"; skill1 = "재정비"; skill2 = "불굴"; skill3 = "전투 태세";
                     targetList = currentAllies;
-                } else {
-                    mainAction = "공격"; skill1 = "강타"; skill2 = "참격";
+                    actionOpts = [
+                        { val: 'main', txt: `${mainAction} (기본)`, rate: 1, cost: 0 },
+                        { val: 'skill1', txt: `${skill1} (2)`, rate: 1.5, cost: 2 },
+                        { val: 'skill2', txt: `${skill2} (3)`, rate: 2.0, cost: 3 },
+                        { val: 'skill3', txt: `${skill3} (4)`, rate: 0, cost: 4 },
+                        { val: 'divider', txt: '---' },
+                        { val: 'obs', txt: '관찰 판정', rate: 0, cost: 0 },
+                        { val: 'luck', txt: '행운 판정', rate: 0, cost: 0 }
+                    ];
+                } else { // 딜러
+                    mainAction = "공격"; skill1 = "강타"; skill2 = "참격"; skill3 = "지속 피해";
                     targetList = currentEnemies;
+                    actionOpts = [
+                        { val: 'main', txt: `${mainAction} (기본)`, rate: 1, cost: 0 },
+                        { val: 'skill1', txt: `${skill1} (2)`, rate: 1.5, cost: 2 },
+                        { val: 'skill2', txt: `${skill2} (3)`, rate: 2.0, cost: 3 },
+                        { val: 'skill3', txt: `${skill3} (3)`, rate: 0, cost: 3 },
+                        { val: 'divider', txt: '---' },
+                        { val: 'obs', txt: '관찰 판정', rate: 0, cost: 0 },
+                        { val: 'luck', txt: '행운 판정', rate: 0, cost: 0 }
+                    ];
                 }
 
-                const actionOpts = [
-                    { val: 'main', txt: `${mainAction} (기본)`, rate: 1 },
-                    { val: 'skill1', txt: `${skill1} (x1.5)`, rate: 1.5 },
-                    { val: 'skill2', txt: `${skill2} (x2.0)`, rate: 2.0 },
-                    { val: 'divider', txt: '---' },
-                    { val: 'obs', txt: '관찰 판정', rate: 0 },
-                    { val: 'luck', txt: '행운 판정', rate: 0 }
-                ];
-                
                 let targetOpts;
                 let initialTargetTxt = '대상 선택';
                 if (targetList.length > 0) {
@@ -454,7 +478,7 @@
                 const tgtDropdown = createDropdown(targetOpts, 'target', initialTargetTxt);
 
                 let statName = (char.role === '딜러') ? '공격' : (char.role === '탱커' ? '방어' : '치유');
-                const statText = `HP:${char.hp} / Cost:${char.cost} / ${statName}:${char.stat} / 관찰:${char.obs} / 행운:${char.luck}`;
+                const statText = `잔여 체력: ${char.hp} / 잔여 코스트: ${char.cost} / ${statName}: ${char.stat} / 관찰: ${char.obs} / 행운: ${char.luck}`;
 
                 row.innerHTML = `
                     <div class="name-col">${char.name}</div>
@@ -476,13 +500,14 @@
             if(opt.val === 'divider') {
                 optsHtml += `<div class="select-option divider"></div>`;
             } else {
-                optsHtml += `<div class="select-option" onclick="selectOption(this, '${opt.val}', ${opt.rate || 0}, '${opt.txt}', event)">${opt.txt}</div>`;
+                // cost 데이터셋 추가
+                optsHtml += `<div class="select-option" onclick="selectOption(this, '${opt.val}', ${opt.rate || 0}, ${opt.cost || 0}, '${opt.txt}', event)">${opt.txt}</div>`;
             }
         });
 
         return `
             <div class="custom-select" onclick="toggleSelect(this, event)">
-                <div class="select-trigger" data-value="${initialVal}" data-rate="1">
+                <div class="select-trigger" data-value="${initialVal}" data-rate="1" data-cost="0">
                     <span>${initialText}</span><div class="arrow"></div>
                 </div>
                 <div class="select-options">${optsHtml}</div>
@@ -503,11 +528,12 @@
         e.stopPropagation();
     }
 
-    function selectOption(el, val, rate, txt, e) {
+    function selectOption(el, val, rate, cost, txt, e) {
         const wrapper = el.closest('.custom-select');
         const trigger = wrapper.querySelector('.select-trigger');
         trigger.dataset.value = val;
         trigger.dataset.rate = rate;
+        trigger.dataset.cost = cost;
         trigger.querySelector('span').innerText = txt;
         
         wrapper.classList.remove('open');
@@ -557,12 +583,23 @@
         
         const mitigationMap = {};   
         const enemyDamageMap = {};  
-        const healingMap = {}; // 치유량 저장 맵 추가
-        
-        // 결과 임시 저장
-        pendingRoundUpdates = { chars: {}, enemies: {} };
+        const healingMap = {}; 
+        const invincibleSet = new Set(); // 무적 대상자 목록
+        let hasCombatAction = false; // 전투 행동 여부 체크
 
-        // 1. 캐릭터 행동 수집
+        // 결과 임시 저장 초기화
+        pendingRoundUpdates = { chars: {}, enemies: {} };
+        pendingCostUpdates = {};
+        pendingDoTAdds = [];
+
+        // 1. 기존 활성화된 지속 피해 적용 (로그에는 출력되지 않음)
+        activeDoTs.forEach(dot => {
+            if(!enemyDamageMap[dot.enemyId]) enemyDamageMap[dot.enemyId] = 0;
+            enemyDamageMap[dot.enemyId] += dot.damage;
+            hasCombatAction = true;
+        });
+
+        // 2. 캐릭터 행동 수집
         activeCharActionList.querySelectorAll('.action-row').forEach(row => {
             const id = parseInt(row.dataset.id);
             const char = characterData.find(c => c.id === id);
@@ -570,96 +607,133 @@
             
             const actType = triggers[0].dataset.value;
             const rate = parseFloat(triggers[0].dataset.rate);
+            const cost = parseInt(triggers[0].dataset.cost);
             const targetTxt = triggers[1].querySelector('span').innerText;
             
+            // 코스트 사용 등록
+            if (!pendingCostUpdates[char.id]) pendingCostUpdates[char.id] = 0;
+            pendingCostUpdates[char.id] -= cost;
+
             if(actType === 'obs' || actType === 'luck') {
                 const isObs = (actType === 'obs');
                 const stat = isObs ? char.obs : char.luck;
                 const dice = Math.floor(Math.random() * 5) + 1;
                 result += `${char.name} ${isObs?'관찰':'행운'} ${(dice <= stat) ? "성공" : "실패"} (${dice}/${stat})\n`;
             } else {
-                const rand = Math.floor(Math.random() * 100) + 1;
-                const val = Math.round(char.stat * rand * rate);
-                
-                let label = "수치";
-                if(char.role === "딜러") {
-                    label = "공격";
-                    if (targetTxt !== '(대상 없음)') {
-                        if (!enemyDamageMap[targetTxt]) enemyDamageMap[targetTxt] = 0;
-                        enemyDamageMap[targetTxt] += val;
-                    }
-                } else if(char.role === "서포터") {
-                    label = "치유";
-                    if (targetTxt !== '(대상 없음)') {
-                        if (!healingMap[targetTxt]) healingMap[targetTxt] = 0;
-                        healingMap[targetTxt] += val;
-                    }
-                } else if(char.role === "탱커") {
-                    label = "방어";
-                    if (targetTxt !== '(대상 없음)') {
-                        if (!mitigationMap[targetTxt]) mitigationMap[targetTxt] = 0;
-                        mitigationMap[targetTxt] += val;
-                    }
-                }
+                // 전투 행동으로 간주
+                hasCombatAction = true;
 
-                result += `${char.name} ${label} ${val}\n`;
+                // 특수 행동 처리: 지속 피해, 무적, 전투 태세
+                if (actType === 'skill3') {
+                    if (char.role === '딜러') {
+                        // 지속 피해 (3라운드, 공격값 * 25 고정)
+                        result += `${char.name} 지속 피해\n`; // 값/대상 표기 X
+                        if (targetTxt !== '(대상 없음)') {
+                            const enemy = enemyData.find(e => e.name === targetTxt);
+                            if (enemy) {
+                                const dotDmg = char.stat * 25;
+                                // 즉시 적용 1틱
+                                if(!enemyDamageMap[enemy.id]) enemyDamageMap[enemy.id] = 0;
+                                enemyDamageMap[enemy.id] += dotDmg;
+                                // 대기열에 추가 (다음 라운드부터 적용될 2회분)
+                                pendingDoTAdds.push({ enemyId: enemy.id, damage: dotDmg, turns: 2 });
+                            }
+                        }
+                    } else if (char.role === '탱커') {
+                        // 무적 (이번 라운드 피해 0)
+                        result += `${char.name} 무적\n`; // 값/대상 표기 X
+                        if (targetTxt !== '(대상 없음)') {
+                            invincibleSet.add(targetTxt);
+                        }
+                    } else if (char.role === '서포터') {
+                        // 전투 태세 (코스트 3 회복 예약)
+                        result += `${char.name} 전투 태세\n`; // 값/대상 표기 X
+                        pendingCostUpdates[char.id] += 3;
+                    }
+                } else {
+                    // 일반 공격/방어/치유/스킬1/스킬2
+                    const rand = Math.floor(Math.random() * 100) + 1;
+                    const val = Math.round(char.stat * rand * rate);
+                    
+                    let label = "수치";
+                    if(char.role === "딜러") {
+                        label = "공격";
+                        if (targetTxt !== '(대상 없음)') {
+                            const enemy = enemyData.find(e => e.name === targetTxt);
+                            if (enemy) {
+                                if (!enemyDamageMap[enemy.id]) enemyDamageMap[enemy.id] = 0;
+                                enemyDamageMap[enemy.id] += val;
+                            }
+                        }
+                    } else if(char.role === "서포터") {
+                        label = "치유";
+                        if (targetTxt !== '(대상 없음)') {
+                            if (!healingMap[targetTxt]) healingMap[targetTxt] = 0;
+                            healingMap[targetTxt] += val;
+                        }
+                    } else if(char.role === "탱커") {
+                        label = "방어";
+                        if (targetTxt !== '(대상 없음)') {
+                            if (!mitigationMap[targetTxt]) mitigationMap[targetTxt] = 0;
+                            mitigationMap[targetTxt] += val;
+                        }
+                    }
+                    result += `${char.name} ${label} ${val}\n`;
+                }
             }
         });
 
         result += "\n";
 
-        // 2. 괴수 피해량 계산 (기존 로직 유지)
+        // 3. 괴수 피해량 계산
         enemyData.forEach(enemy => {
             if(activeEnemyIds.has(enemy.id)) {
-                const incoming = enemyDamageMap[enemy.name] || 0;
+                const incoming = enemyDamageMap[enemy.id] || 0;
                 if(incoming > 0) {
                     pendingRoundUpdates.enemies[enemy.id] = incoming;
                 }
             }
         });
 
-        // 3. 캐릭터 피해량 및 회복 계산 (수정된 로직)
-        // 공격받지 않아도 회복을 처리하기 위해 모든 출전 캐릭터를 순회
-        
-        // (1) 먼저 들어온 공격 피해량을 맵핑
+        // 4. 캐릭터 피해량 및 회복 계산
         const incomingAttackMap = {};
         pendingAttacks.forEach(atk => {
             if(!incomingAttackMap[atk.target]) incomingAttackMap[atk.target] = 0;
             incomingAttackMap[atk.target] += atk.val;
         });
 
-        // (2) 각 캐릭터의 최종 상태 계산
         activeCharIds.forEach(charId => {
             const char = characterData.find(c => c.id === charId);
             if (!char) return;
             
-            const incoming = incomingAttackMap[char.name] || 0;
+            let incoming = incomingAttackMap[char.name] || 0;
+            
+            // 무적 체크
+            if (invincibleSet.has(char.name)) {
+                incoming = 0;
+            }
+
             const mit = mitigationMap[char.name] || 0;
             let heal = healingMap[char.name] || 0;
 
-            // 로직: 체력이 0인 경우(사망자) 회복 불가
-            if (char.hp <= 0) {
-                heal = 0;
-            }
+            if (char.hp <= 0) heal = 0;
 
-            // 피해량 계산 (음수 방지)
             let actualDmg = incoming - mit;
             if (actualDmg < 0) actualDmg = 0;
 
-            // 최종 체력 계산
             let newHp = char.hp - actualDmg + heal;
-            
-            // 체력 한계 보정 (0 ~ 1000)
             if (newHp > 1000) newHp = 1000;
             if (newHp < 0) newHp = 0;
 
-            // 변화가 있거나 전투에 연루된 경우 결과에 추가
-            if (incoming > 0 || heal > 0) {
-                pendingRoundUpdates.chars[char.id] = newHp; // 최종 HP를 저장
+            if (incoming > 0 || heal > 0 || invincibleSet.has(char.name)) {
+                pendingRoundUpdates.chars[char.id] = newHp;
                 
                 let logStr = `${char.name}`;
-                if (actualDmg > 0) logStr += ` -${actualDmg}`;
-                else if (incoming > 0 && actualDmg === 0) logStr += ` (방어됨)`;
+                if (invincibleSet.has(char.name)) logStr += ` (무적)`;
+                else {
+                    if (actualDmg > 0) logStr += ` -${actualDmg}`;
+                    else if (incoming > 0 && actualDmg === 0) logStr += ` (방어됨)`;
+                }
                 
                 if (heal > 0) logStr += ` +${heal}`;
                 
@@ -667,23 +741,24 @@
             }
         });
 
-        // 4. 라운드 예상 결산 (UI 표시용)
-        result += "\n라운드 결산\n";
-        
-        activeCharIds.forEach(id => {
-            const char = characterData.find(c => c.id === id);
-            // pendingRoundUpdates에 값이 있으면 그 값(newHp), 없으면 현재 hp
-            const finalHp = (pendingRoundUpdates.chars[id] !== undefined) ? pendingRoundUpdates.chars[id] : char.hp;
-            result += `${char.name} ${finalHp}\n`;
-        });
-        
-        enemyData.forEach(e => {
-            if(activeEnemyIds.has(e.id)) {
-                const dmg = pendingRoundUpdates.enemies[e.id] || 0;
-                const nextHp = Math.max(0, e.hp - dmg);
-                result += `${e.name} ${nextHp}\n`;
-            }
-        });
+        // 5. 라운드 결산 (조건부 출력)
+        if (hasCombatAction) {
+            result += "\n라운드 결산\n";
+            
+            activeCharIds.forEach(id => {
+                const char = characterData.find(c => c.id === id);
+                const finalHp = (pendingRoundUpdates.chars[id] !== undefined) ? pendingRoundUpdates.chars[id] : char.hp;
+                result += `${char.name} ${finalHp}\n`;
+            });
+            
+            enemyData.forEach(e => {
+                if(activeEnemyIds.has(e.id)) {
+                    const dmg = pendingRoundUpdates.enemies[e.id] || 0;
+                    const nextHp = Math.max(0, e.hp - dmg);
+                    result += `${e.name} ${nextHp}\n`;
+                }
+            });
+        }
 
         document.getElementById('charResultArea').value = result;
     }
@@ -694,35 +769,48 @@
             return;
         }
 
-        // 1. 캐릭터 체력 갱신 (저장된 최종 HP 값을 그대로 적용)
+        // 1. 캐릭터 체력 및 코스트 갱신
         for (const [idStr, newHp] of Object.entries(pendingRoundUpdates.chars)) {
             const id = parseInt(idStr);
             const char = characterData.find(c => c.id === id);
             if(char) {
                 char.hp = newHp;
-                
-                // 체력이 0 이하면 출전 목록에서 제거
-                if (char.hp <= 0) {
-                    activeCharIds.delete(id);
-                }
+                if (char.hp <= 0) activeCharIds.delete(id);
+            }
+        }
+        
+        // 코스트 적용
+        for (const [idStr, costChange] of Object.entries(pendingCostUpdates)) {
+            const id = parseInt(idStr);
+            const char = characterData.find(c => c.id === id);
+            if(char) {
+                char.cost += costChange;
+                // 코스트 하한선은 0으로 가정하지 않음 (음수 가능)하거나 필요시 0 제한.
+                if (char.cost < 0) char.cost = 0; 
             }
         }
 
-        // 2. 에너미 체력 갱신 (기존 데미지 차감 방식 유지)
+        // 2. 에너미 체력 갱신
         for (const [id, dmg] of Object.entries(pendingRoundUpdates.enemies)) {
             const enemy = enemyData.find(e => e.id === id);
             if(enemy) {
                 enemy.hp = Math.max(0, enemy.hp - dmg);
-                
-                // 체력이 0 이하면 출현 목록에서 제거
-                if (enemy.hp <= 0) {
-                    activeEnemyIds.delete(id);
-                }
+                if (enemy.hp <= 0) activeEnemyIds.delete(id);
             }
         }
 
-        // 3. 초기화 및 UI 갱신
+        // 3. 지속 피해(DoT) 갱신
+        // 신규 DoT 추가
+        activeDoTs.push(...pendingDoTAdds);
+        // 기존 DoT 턴 차감
+        activeDoTs.forEach(dot => dot.turns -= 1);
+        // 만료된 DoT 제거
+        activeDoTs = activeDoTs.filter(dot => dot.turns > 0);
+
+        // 4. 초기화 및 UI 갱신
         pendingRoundUpdates = null;
+        pendingCostUpdates = {};
+        pendingDoTAdds = [];
         pendingAttacks = [];
         
         renderAll();
