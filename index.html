@@ -655,40 +655,55 @@
         document.getElementById('charResultArea').value = result;
     }
 
+    // [수정] 라운드 결과 저장 (체력 0인 대상 자동 제외 포함)
     function saveRoundResult() {
         if (!pendingRoundUpdates) {
             alert("저장할 결과가 없습니다.");
             return;
         }
 
-        // 1. 캐릭터 체력 갱신
+        // 1. 캐릭터 체력 갱신 및 사망자 체크
         for (const [idStr, dmg] of Object.entries(pendingRoundUpdates.chars)) {
             const id = parseInt(idStr);
             const char = characterData.find(c => c.id === id);
-            if(char) char.hp = Math.max(0, char.hp - dmg);
+            if(char) {
+                char.hp = Math.max(0, char.hp - dmg);
+                
+                // [추가된 부분] 체력이 0 이하면 출전 목록에서 제거
+                if (char.hp <= 0) {
+                    activeCharIds.delete(id);
+                }
+            }
         }
 
-        // 2. 에너미 체력 갱신
+        // 2. 에너미 체력 갱신 및 처치 체크
         for (const [id, dmg] of Object.entries(pendingRoundUpdates.enemies)) {
             const enemy = enemyData.find(e => e.id === id);
-            if(enemy) enemy.hp = Math.max(0, enemy.hp - dmg);
+            if(enemy) {
+                enemy.hp = Math.max(0, enemy.hp - dmg);
+                
+                // [추가된 부분] 체력이 0 이하면 출현 목록에서 제거
+                if (enemy.hp <= 0) {
+                    activeEnemyIds.delete(id);
+                }
+            }
         }
 
         // 3. 초기화 및 UI 갱신
         pendingRoundUpdates = null;
         pendingAttacks = [];
         
-        renderAll();
+        renderAll(); // activeIds에서 삭제된 대상은 여기서 렌더링되지 않음
         
         document.getElementById('enemyResultArea').value = "";
-        document.getElementById('charResultArea').value = "저장 완료. 다음 라운드를 진행하세요.";
+        document.getElementById('charResultArea').value = "저장 완료!";
         alert("체력이 갱신되었습니다.");
     }
 
     function copyToClipboard(id) {
         const el = document.getElementById(id);
         if(!el.value) return;
-        el.select(); document.execCommand('copy'); alert('복사되었습니다.');
+        el.select(); document.execCommand('copy'); alert('복사 완료!');
     }
 
     // 초기 실행
