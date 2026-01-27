@@ -435,6 +435,7 @@
                         { val: 'skill1', txt: `${skill1} (2)`, rate: 1.5, cost: 2 },
                         { val: 'skill2', txt: `${skill2} (3)`, rate: 2.0, cost: 3 },
                         { val: 'skill3', txt: `${skill3} (4)`, rate: 0, cost: 4 },
+                        { val: 'skill_simple', txt: '개인 스킬', rate: 0, cost: 0 },
                         { val: 'divider', txt: '---' },
                         { val: 'obs', txt: '관찰 판정', rate: 0, cost: 0 },
                         { val: 'luck', txt: '행운 판정', rate: 0, cost: 0 }
@@ -447,6 +448,7 @@
                         { val: 'skill1', txt: `${skill1} (2)`, rate: 1.5, cost: 2 },
                         { val: 'skill2', txt: `${skill2} (3)`, rate: 2.0, cost: 3 },
                         { val: 'skill3', txt: `${skill3} (4)`, rate: 0, cost: 4 },
+                        { val: 'skill_simple', txt: '개인 스킬', rate: 0, cost: 0 },
                         { val: 'divider', txt: '---' },
                         { val: 'obs', txt: '관찰 판정', rate: 0, cost: 0 },
                         { val: 'luck', txt: '행운 판정', rate: 0, cost: 0 }
@@ -459,6 +461,7 @@
                         { val: 'skill1', txt: `${skill1} (2)`, rate: 1.5, cost: 2 },
                         { val: 'skill2', txt: `${skill2} (3)`, rate: 2.0, cost: 3 },
                         { val: 'skill3', txt: `${skill3} (3)`, rate: 0, cost: 3 },
+                        { val: 'skill_simple', txt: '개인 스킬', rate: 0, cost: 0 },
                         { val: 'divider', txt: '---' },
                         { val: 'obs', txt: '관찰 판정', rate: 0, cost: 0 },
                         { val: 'luck', txt: '행운 판정', rate: 0, cost: 0 }
@@ -579,6 +582,21 @@
 
     function characterAction() {
         if(activeCharIds.size === 0) return;
+
+        const rows = activeCharActionList.querySelectorAll('.action-row');
+        for (const row of rows) {
+            const id = parseInt(row.dataset.id);
+            const char = characterData.find(c => c.id === id);
+            const trigger = row.querySelector('.select-trigger');
+            const cost = parseInt(trigger.dataset.cost || 0);
+
+            // 현재 코스트보다 필요 코스트가 크면 경고 후 중단
+            if (char.cost < cost) {
+                alert(`[${char.name}] 코스트가 부족합니다. (보유: ${char.cost} / 필요: ${cost})`);
+                return; // 함수 실행 종료
+            }
+        }
+
         let result = "";
         
         const mitigationMap = {};   
@@ -650,6 +668,9 @@
                         result += `${char.name} 전투 태세\n`; // 값/대상 표기 X
                         pendingCostUpdates[char.id] += 3;
                     }
+                    } else if (actType === 'skill_simple') { 
+                    // 단순 스킬 사용
+                    result += `${char.name} 스킬 사용\n`;
                 } else {
                     // 일반 공격/방어/치유/스킬1/스킬2
                     const rand = Math.floor(Math.random() * 100) + 1;
