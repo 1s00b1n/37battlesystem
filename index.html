@@ -550,7 +550,6 @@
             
             const target = chars[Math.floor(Math.random() * chars.length)];
 
-            // [변경] 최솟값 ~ 최댓값 사이의 무작위 정수 산출
             // 공식: Math.floor(Math.random() * (max - min + 1)) + min
             const val = Math.floor(Math.random() * (enemy.maxAtk - enemy.minAtk + 1)) + enemy.minAtk;
             
@@ -566,38 +565,44 @@
         if(activeCharIds.size === 0) return;
         let result = "";
         
-        // 캐릭터별 데미지 경감값(방어+치유)을 저장할 객체
-        const mitigationMap = {};
+        // 1. 계산을 위한 임시 저장소
+        const mitigationMap = {};   // 캐릭터가 받는 방어/치유량 합계
+        const enemyDamageMap = {};  // 괴수가 받는 피해량 합계
 
+        // 2. 캐릭터 행동 처리 Loop
         activeCharActionList.querySelectorAll('.action-row').forEach(row => {
             const id = parseInt(row.dataset.id);
             const char = characterData.find(c => c.id === id);
             const triggers = row.querySelectorAll('.select-trigger');
             
-            // 행동 정보 가져오기
             const actType = triggers[0].dataset.value;
             const rate = parseFloat(triggers[0].dataset.rate);
-            
-            // 타겟 이름 가져오기
             const targetTxt = triggers[1].querySelector('span').innerText;
             
             if(actType === 'obs' || actType === 'luck') {
-                // 관찰/행운 판정
                 const isObs = (actType === 'obs');
                 const stat = isObs ? char.obs : char.luck;
                 const dice = Math.floor(Math.random() * 5) + 1;
                 result += `${char.name} ${isObs?'관찰':'행운'} ${(dice <= stat) ? "성공" : "실패"} (${dice}/${stat})\n`;
             } else {
-                // 일반 행동 계산
                 const rand = Math.floor(Math.random() * 100) + 1;
                 const val = Math.round(char.stat * rand * rate);
                 
                 let label = "수치";
-                if(char.role === "딜러") label = "공격";
-                else if(char.role === "서포터") label = "치유";
-                else if(char.role === "탱커") label = "방어";
+                if(char.role === "딜러") {
+                    label = "공격";
+                    // [추가] 딜러가 에너미를 공격한 경우 데미지 누적
+                    if (targetTxt !== '(대상 없음)') {
+                        if (!enemyDamageMap[targetTxt]) enemyDamageMap[targetTxt] = 0;
+                        enemyDamageMap[targetTxt] += val;
+                    }
+                } else if(char.role === "서포터") {
+                    label = "치유";
+                } else if(char.role === "탱커") {
+                    label = "방어";
+                }
 
-                // [변경점] 탱커(방어) 또는 서포터(치유)인 경우 해당 타겟의 경감값에 누적
+                // 방어/치유인 경우 아군 경감값 누적
                 if ((char.role === "탱커" || char.role === "서포터") && targetTxt !== '(대상 없음)') {
                     if (!mitigationMap[targetTxt]) mitigationMap[targetTxt] = 0;
                     mitigationMap[targetTxt] += val;
@@ -607,29 +612,62 @@
             }
         });
 
-        // --- [최종 결산] 괴수 공격 - (캐릭터 방어 + 치유) ---
+        result += "\n"; // [변경] [결산] 텍스트 제거하고 줄바꿈만
+
+        // 3. 데미지 적용 및 잔여 체력 계산
+        
+        // (1) 괴수 체력 갱신 (딜러 공격 적용)
+        enemyData.forEach(enemy => {
+            if(activeEnemyIds.has(enemy.id)) {
+                const incoming = enemyDamageMap[enemy.name] || 0;
+                if(incoming > 0) {
+                    enemy.hp -= incoming;
+                    if(enemy.hp < 0) enemy.hp = 0;
+                    // 괴수가 맞았다는 로그가 필요하다면 여기에 추가 가능
+                }
+            }
+        });
+
+        // (2) 캐릭터 체력 갱신 (괴수 공격 - 방어/치유 적용)
         if(pendingAttacks.length > 0) {
-            result += "\n[결산]\n";
-            
-            // 1. 공격받은 캐릭터별로 데미지 합산
+            // 공격받은 캐릭터별로 데미지 합산
             const damageMap = {};
             pendingAttacks.forEach(atk => {
                 if(!damageMap[atk.target]) damageMap[atk.target] = 0;
                 damageMap[atk.target] += atk.val;
             });
 
-            // 2. 최종 데미지 계산
             for (const [name, incomingDmg] of Object.entries(damageMap)) {
-                const mit = mitigationMap[name] || 0; // 방어값 + 치유값 합계
+                const mit = mitigationMap[name] || 0; 
                 let finalDmg = incomingDmg - mit;
-                
-                // 데미지가 0보다 작아지면 0으로 처리 (완전 상쇄)
                 if(finalDmg < 0) finalDmg = 0;
 
-                // 출력: 인물명 -(최종 데미지)
-                result += `${name} -${finalDmg}\n`;
+                // 실제 캐릭터 데이터 HP 차감
+                const char = characterData.find(c => c.name === name);
+                if(char) {
+                    char.hp -= finalDmg;
+                    if(char.hp < 0) char.hp = 0;
+                    result += `${name} -${finalDmg}\n`;
+                }
             }
         }
+
+        // 4. 잔여 체력 전체 출력
+        result += "\n--- 잔여 체력 ---\n";
+        
+        // 활성화된 아군 체력
+        characterData.forEach(c => {
+            if(activeCharIds.has(c.id)) {
+                result += `${c.name}: ${c.hp}\n`;
+            }
+        });
+        
+        // 활성화된 적군 체력
+        enemyData.forEach(e => {
+            if(activeEnemyIds.has(e.id)) {
+                result += `${e.name}: ${e.hp}\n`;
+            }
+        });
 
         document.getElementById('charResultArea').value = result;
     }
