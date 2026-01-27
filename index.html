@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>전투자동화시스템</title>
+    <title>전투</title>
     <style>
         :root {
             --primary: #32afc7;
@@ -263,11 +263,11 @@
 <script>
     // --- 데이터 ---
     const enemyData = [
-        { id: 'e1', name: '괴수1', hp: 1000 },
-        { id: 'e2', name: '괴수2', hp: 1000 },
-        { id: 'e3', name: '괴수3', hp: 1000 },
-        { id: 'mb', name: '중간보스', hp: 4500 },
-        { id: 'fb', name: '최종보스', hp: 4500 }
+        { id: 'e1', name: '괴수1', hp: 1000, stat: 5 },
+        { id: 'e2', name: '괴수2', hp: 1000, stat: 5 },
+        { id: 'e3', name: '괴수3', hp: 1000, stat: 5 },
+        { id: 'mb', name: '중간보스', hp: 4500, stat: 8 },
+        { id: 'fb', name: '최종보스', hp: 4500, stat: 10 }
     ];
 
     const characterData = [
@@ -374,7 +374,6 @@
     function removeChar(id) { activeCharIds.delete(id); renderAll(); }
     function removeEnemy(id) { activeEnemyIds.delete(id); renderAll(); }
 
-
     function renderEnemyActionSection() {
         activeEnemyActionList.innerHTML = '';
         if(activeEnemyIds.size === 0) {
@@ -388,15 +387,16 @@
                 row.className = 'action-row';
                 row.dataset.id = enemy.id;
 
+                // 행동 옵션에 rate(배율) 추가
                 const dropdown = createDropdown([
-                    { val: 'act1', txt: '행동1' },
-                    { val: 'act2', txt: '행동2' }
-                ], 'act1', '행동1');
+                    { val: 'act1', txt: '행동1 (x1.0)', rate: 1.0 },
+                    { val: 'act2', txt: '행동2 (x1.5)', rate: 1.5 }
+                ], 'act1', '행동1 (x1.0)');
 
                 row.innerHTML = `
                     <div class="name-col">${enemy.name}</div>
                     <div class="action-col">${dropdown}</div>
-                    <div class="info-col">HP: ${enemy.hp}</div>
+                    <div class="info-col">HP: ${enemy.hp} / 공격력: ${enemy.stat}</div>
                 `;
                 activeEnemyActionList.appendChild(row);
             }
@@ -534,7 +534,7 @@
     // --- 실행 로직 ---
     function enemyAction() {
         if(activeEnemyIds.size === 0) return alert('에너미가 없습니다.');
-        if(activeCharIds.size === 0) return alert('타겟이 없습니다.');
+        if(activeCharIds.size === 0) return alert('타겟(캐릭터)이 없습니다.');
         
         const chars = characterData.filter(c => activeCharIds.has(c.id));
         let result = "";
@@ -542,11 +542,20 @@
         activeEnemyActionList.querySelectorAll('.action-row').forEach(row => {
             const id = row.dataset.id;
             const enemy = enemyData.find(e => e.id === id);
-            const actVal = row.querySelector('.select-trigger').dataset.value;
-            const actName = (actVal === 'act1') ? '행동1' : '행동2';
             
+            // 선택된 행동 값과 배율 가져오기
+            const trigger = row.querySelector('.select-trigger');
+            const actRate = parseFloat(trigger.dataset.rate) || 1.0; // 기본값 1.0
+            const actTxt = trigger.querySelector('span').innerText.split(' (')[0]; // 텍스트에서 괄호 제거
+            
+            // 랜덤 타겟 선정
             const target = chars[Math.floor(Math.random() * chars.length)];
-            result += `[${enemy.name}>${target.name}] ${actName}\n`;
+
+            // 수치 계산: 스탯 * (1~100) * 배율
+            const rand = Math.floor(Math.random() * 100) + 1;
+            const val = Math.round(enemy.stat * rand * actRate);
+            
+            result += `[${enemy.name} ▶ ${target.name}] ${actTxt} (위력: ${val})\n`;
         });
         document.getElementById('enemyResultArea').value = result;
     }
