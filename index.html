@@ -263,11 +263,11 @@
 <script>
     // --- 데이터 ---
     const enemyData = [
-        { id: 'e1', name: '괴수1', hp: 1000, stat: 5 },
-        { id: 'e2', name: '괴수2', hp: 1000, stat: 5 },
-        { id: 'e3', name: '괴수3', hp: 1000, stat: 5 },
-        { id: 'mb', name: '중간보스', hp: 4500, stat: 8 },
-        { id: 'fb', name: '최종보스', hp: 4500, stat: 10 }
+        { id: 'e1', name: '괴수1', hp: 1000, minAtk: 100, maxAtk: 300 },
+        { id: 'e2', name: '괴수2', hp: 1000, minAtk: 100, maxAtk: 300 },
+        { id: 'e3', name: '괴수3', hp: 1000, minAtk: 100, maxAtk: 300 },
+        { id: 'mb', name: '중간보스', hp: 4500, minAtk: 200, maxAtk: 500 },
+        { id: 'fb', name: '최종보스', hp: 4500, minAtk: 500, maxAtk: 1000 }
     ];
 
     const characterData = [
@@ -388,7 +388,6 @@
                 row.className = 'action-row';
                 row.dataset.id = enemy.id;
 
-                // [변경] 행동1, 행동2 모두 배율(rate) 1.0으로 통일
                 const dropdown = createDropdown([
                     { val: 'act1', txt: '행동1', rate: 1.0 },
                     { val: 'act2', txt: '행동2', rate: 1.0 }
@@ -397,7 +396,7 @@
                 row.innerHTML = `
                     <div class="name-col">${enemy.name}</div>
                     <div class="action-col">${dropdown}</div>
-                    <div class="info-col">HP: ${enemy.hp} / 공격력: ${enemy.stat}</div>
+                    <div class="info-col">HP: ${enemy.hp} / 공격력: ${enemy.minAtk}~${enemy.maxAtk}</div>
                 `;
                 activeEnemyActionList.appendChild(row);
             }
@@ -547,15 +546,15 @@
             const enemy = enemyData.find(e => e.id === id);
             
             const trigger = row.querySelector('.select-trigger');
-            const actRate = parseFloat(trigger.dataset.rate) || 1.0;
             const actTxt = trigger.querySelector('span').innerText;
             
             const target = chars[Math.floor(Math.random() * chars.length)];
 
-            // 수치 계산 (스탯 * 1~100 * 배율)
-            const rand = Math.floor(Math.random() * 100) + 1;
-            const val = Math.round(enemy.stat * rand * actRate);
+            // [변경] 최솟값 ~ 최댓값 사이의 무작위 정수 산출
+            // 공식: Math.floor(Math.random() * (max - min + 1)) + min
+            const val = Math.floor(Math.random() * (enemy.maxAtk - enemy.minAtk + 1)) + enemy.minAtk;
             
+            // 공격 데이터 저장
             pendingAttacks.push({ target: target.name, val: val });
 
             result += `[${enemy.name}>${target.name}] ${actTxt} ${val}\n`;
@@ -563,13 +562,12 @@
         document.getElementById('enemyResultArea').value = result;
     }
 
-    // [수정] 캐릭터 대응 실행 (최종 데미지 결산 로직 추가)
     function characterAction() {
         if(activeCharIds.size === 0) return;
         let result = "";
         
-        // 캐릭터별 방어 총합을 저장할 객체
-        const defenseMap = {};
+        // 캐릭터별 데미지 경감값(방어+치유)을 저장할 객체
+        const mitigationMap = {};
 
         activeCharActionList.querySelectorAll('.action-row').forEach(row => {
             const id = parseInt(row.dataset.id);
@@ -584,7 +582,7 @@
             const targetTxt = triggers[1].querySelector('span').innerText;
             
             if(actType === 'obs' || actType === 'luck') {
-                // 관찰/행운 판정 (기존 유지)
+                // 관찰/행운 판정
                 const isObs = (actType === 'obs');
                 const stat = isObs ? char.obs : char.luck;
                 const dice = Math.floor(Math.random() * 5) + 1;
@@ -597,21 +595,21 @@
                 let label = "수치";
                 if(char.role === "딜러") label = "공격";
                 else if(char.role === "서포터") label = "치유";
-                else if(char.role === "탱커") {
-                    label = "방어";
-                    // [중요] 탱커가 방어 행동을 했고, 대상이 존재하면 방어값 누적
-                    if(targetTxt !== '(대상 없음)') {
-                        if(!defenseMap[targetTxt]) defenseMap[targetTxt] = 0;
-                        defenseMap[targetTxt] += val;
-                    }
+                else if(char.role === "탱커") label = "방어";
+
+                // [변경점] 탱커(방어) 또는 서포터(치유)인 경우 해당 타겟의 경감값에 누적
+                if ((char.role === "탱커" || char.role === "서포터") && targetTxt !== '(대상 없음)') {
+                    if (!mitigationMap[targetTxt]) mitigationMap[targetTxt] = 0;
+                    mitigationMap[targetTxt] += val;
                 }
 
                 result += `${char.name} ${label} ${val} (대상: ${targetTxt})\n`;
             }
         });
 
+        // --- [최종 결산] 괴수 공격 - (캐릭터 방어 + 치유) ---
         if(pendingAttacks.length > 0) {
-            result += "\n";
+            result += "\n[결산]\n";
             
             // 1. 공격받은 캐릭터별로 데미지 합산
             const damageMap = {};
@@ -620,13 +618,15 @@
                 damageMap[atk.target] += atk.val;
             });
 
-            // 2. 최종 데미지 계산 (받은 데미지 - 방어값)
+            // 2. 최종 데미지 계산
             for (const [name, incomingDmg] of Object.entries(damageMap)) {
-                const def = defenseMap[name] || 0; // 해당 캐릭터에게 들어간 방어값 합계
-                let finalDmg = incomingDmg - def;
-                if(finalDmg < 0) finalDmg = 0; // 마이너스 방지
+                const mit = mitigationMap[name] || 0; // 방어값 + 치유값 합계
+                let finalDmg = incomingDmg - mit;
+                
+                // 데미지가 0보다 작아지면 0으로 처리 (완전 상쇄)
+                if(finalDmg < 0) finalDmg = 0;
 
-                // 요청하신 양식: 인물명 -(최종 데미지)
+                // 출력: 인물명 -(최종 데미지)
                 result += `${name} -${finalDmg}\n`;
             }
         }
