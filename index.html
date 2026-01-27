@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>전투</title>
+    <title>전투자동화시스템</title>
     <style>
         :root {
             --primary: #32afc7;
@@ -255,6 +255,10 @@
             <button class="btn-main" onclick="characterAction()">캐릭터 대응 실행</button>
             <textarea id="charResultArea" readonly placeholder="결과 출력..."></textarea>
             <button class="btn-copy" onclick="copyToClipboard('charResultArea')">결과 복사</button>
+            
+            <button class="btn-main" style="background-color: #32afc7; margin-top: 10px;" onclick="saveRoundResult()">
+                라운드 결과 저장 (체력 갱신)
+            </button>
         </div>
     </section>
 
@@ -263,9 +267,9 @@
 <script>
     // --- 데이터 ---
     const enemyData = [
-        { id: 'e1', name: '괴수1', hp: 1000, minAtk: 100, maxAtk: 300 },
-        { id: 'e2', name: '괴수2', hp: 1000, minAtk: 100, maxAtk: 300 },
-        { id: 'e3', name: '괴수3', hp: 1000, minAtk: 100, maxAtk: 300 },
+        { id: 'e1', name: '괴수1', hp: 1000, minAtk: 50, maxAtk: 200 },
+        { id: 'e2', name: '괴수2', hp: 1000, minAtk: 50, maxAtk: 200 },
+        { id: 'e3', name: '괴수3', hp: 1000, minAtk: 50, maxAtk: 200 },
         { id: 'mb', name: '중간보스', hp: 4500, minAtk: 200, maxAtk: 500 },
         { id: 'fb', name: '최종보스', hp: 4500, minAtk: 500, maxAtk: 1000 }
     ];
@@ -282,25 +286,19 @@
         { id: 9, name: "인물9", role: "서포터", hp: 1000, cost: 5, stat: 4, obs: 5, luck: 3 }
     ];
 
-    const monsterTargets = ["괴수1", "괴수2", "괴수3", "중간보스", "최종보스"];
-    const allyTargets = characterData.map(c => c.name);
-
     // --- 상태 ---
     const activeEnemyIds = new Set();
     const activeCharIds = new Set();
-    let pendingAttacks = [];
+    let pendingAttacks = []; // 에너미 공격 데이터
+    let pendingRoundUpdates = null; // 라운드 결과(HP 변동) 임시 저장
 
     // --- DOM 요소 ---
-    // STEP 1
     const poolDealer = document.getElementById('poolDealer');
     const poolTanker = document.getElementById('poolTanker');
     const poolSupporter = document.getElementById('poolSupporter');
     const deployedCharList = document.getElementById('deployedCharList');
-
     const poolEnemy = document.getElementById('poolEnemy');
     const deployedEnemyList = document.getElementById('deployedEnemyList');
-
-    // STEP 2 & 3
     const activeEnemyActionList = document.getElementById('activeEnemyActionList');
     const activeCharActionList = document.getElementById('activeCharActionList');
 
@@ -312,7 +310,7 @@
     }
 
     function renderPrepSection() {
-        // 1. 캐릭터 풀 (Available)
+        // 1. 캐릭터 풀
         poolDealer.innerHTML = ''; poolTanker.innerHTML = ''; poolSupporter.innerHTML = '';
         characterData.forEach(char => {
             if(!activeCharIds.has(char.id)) {
@@ -327,7 +325,7 @@
             }
         });
 
-        // 2. 캐릭터 출전 (Deployed) - 삭제 버튼 포함
+        // 2. 캐릭터 출전
         deployedCharList.innerHTML = '';
         if(activeCharIds.size === 0) deployedCharList.innerHTML = '<div class="empty-text">목록에서 인물을 클릭하여 추가하세요.</div>';
         
@@ -343,7 +341,7 @@
             }
         });
 
-        // 3. 에너미 풀 (Available)
+        // 3. 에너미 풀
         poolEnemy.innerHTML = '';
         enemyData.forEach(enemy => {
             if(!activeEnemyIds.has(enemy.id)) {
@@ -355,7 +353,7 @@
             }
         });
 
-        // 4. 에너미 출현 (Deployed) - 삭제 버튼 포함
+        // 4. 에너미 출현
         deployedEnemyList.innerHTML = '';
         if(activeEnemyIds.size === 0) deployedEnemyList.innerHTML = '<div class="empty-text">목록에서 에너미를 클릭하여 추가하세요.</div>';
 
@@ -410,7 +408,6 @@
             return;
         }
 
-        // [수정됨] 현재 활성화된 에너미와 아군 목록을 실시간으로 생성
         const currentEnemies = enemyData.filter(e => activeEnemyIds.has(e.id)).map(e => e.name);
         const currentAllies = characterData.filter(c => activeCharIds.has(c.id)).map(c => c.name);
 
@@ -420,25 +417,21 @@
                 row.className = 'action-row';
                 row.dataset.id = char.id;
 
-                // 포지션별 행동 정의
                 let mainAction = "공격";
                 let skill1 = "강타", skill2 = "참격";
                 let targetList = [];
 
-                // [수정됨] 역할에 따라 현재 활성화된 대상 리스트 할당
                 if (char.role === "탱커") {
                     mainAction = "방어"; skill1 = "수호"; skill2 = "철벽";
-                    targetList = currentAllies; // 아군 대상 (출전 중인 캐릭터)
+                    targetList = currentAllies;
                 } else if (char.role === "서포터") {
                     mainAction = "치유"; skill1 = "재정비"; skill2 = "불굴";
-                    targetList = currentAllies; // 아군 대상 (출전 중인 캐릭터)
+                    targetList = currentAllies;
                 } else {
-                    // 딜러일 경우
                     mainAction = "공격"; skill1 = "강타"; skill2 = "참격";
-                    targetList = currentEnemies; // 적 대상 (출현 중인 에너미)
+                    targetList = currentEnemies;
                 }
 
-                // 행동 옵션
                 const actionOpts = [
                     { val: 'main', txt: `${mainAction} (기본)`, rate: 1 },
                     { val: 'skill1', txt: `${skill1} (x1.5)`, rate: 1.5 },
@@ -448,10 +441,8 @@
                     { val: 'luck', txt: '행운 판정', rate: 0 }
                 ];
                 
-                // [수정됨] 타겟 옵션 생성 (대상이 없을 경우 '없음' 처리)
                 let targetOpts;
                 let initialTargetTxt = '대상 선택';
-
                 if (targetList.length > 0) {
                     targetOpts = targetList.map(t => ({ val: 'target', txt: t }));
                 } else {
@@ -462,7 +453,6 @@
                 const actDropdown = createDropdown(actionOpts, 'main', `${mainAction} (기본)`);
                 const tgtDropdown = createDropdown(targetOpts, 'target', initialTargetTxt);
 
-                // 스탯 텍스트
                 let statName = (char.role === '딜러') ? '공격' : (char.role === '탱커' ? '방어' : '치유');
                 const statText = `HP:${char.hp} / Cost:${char.cost} / ${statName}:${char.stat} / 관찰:${char.obs} / 행운:${char.luck}`;
 
@@ -479,7 +469,7 @@
         });
     }
 
-    // --- 드롭다운 생성 헬퍼 ---
+    // --- 드롭다운 UI 헬퍼 ---
     function createDropdown(options, initialVal, initialText) {
         let optsHtml = '';
         options.forEach(opt => {
@@ -500,14 +490,13 @@
         `;
     }
 
-    // --- 이벤트 핸들러 ---
     function toggleSelect(el, e) {
         document.querySelectorAll('.custom-select').forEach(x => { if(x !== el) x.classList.remove('open'); });
-        document.querySelectorAll('.action-row').forEach(row => row.style.zIndex = 'auto'); // z-index reset
+        document.querySelectorAll('.action-row').forEach(row => row.style.zIndex = 'auto');
         
         if(!el.classList.contains('open')) {
             el.classList.add('open');
-            el.closest('.action-row').style.zIndex = '1000'; // Bring to front
+            el.closest('.action-row').style.zIndex = '1000';
         } else {
             el.classList.remove('open');
         }
@@ -532,6 +521,7 @@
     }
 
     // --- 실행 로직 ---
+
     function enemyAction() {
         if(activeEnemyIds.size === 0) return alert('에너미가 없습니다.');
         if(activeCharIds.size === 0) return alert('타겟(캐릭터)이 없습니다.');
@@ -550,13 +540,13 @@
             
             const target = chars[Math.floor(Math.random() * chars.length)];
 
-            // 공식: Math.floor(Math.random() * (max - min + 1)) + min
+            // 공식: min ~ max 사이 랜덤 값
             const val = Math.floor(Math.random() * (enemy.maxAtk - enemy.minAtk + 1)) + enemy.minAtk;
             
             // 공격 데이터 저장
             pendingAttacks.push({ target: target.name, val: val });
 
-            result += `[${enemy.name}>${target.name}] ${actTxt} ${val}\n`;
+            result += `[${enemy.name} > ${target.name}] ${actTxt} ${val}\n`;
         });
         document.getElementById('enemyResultArea').value = result;
     }
@@ -565,11 +555,12 @@
         if(activeCharIds.size === 0) return;
         let result = "";
         
-        // 1. 계산을 위한 임시 저장소
-        const mitigationMap = {};   // 캐릭터가 받는 방어/치유량 합계
-        const enemyDamageMap = {};  // 괴수가 받는 피해량 합계
+        const mitigationMap = {};   
+        const enemyDamageMap = {};  
+        
+        // HP 변동 사항 임시 저장
+        pendingRoundUpdates = { chars: {}, enemies: {} };
 
-        // 2. 캐릭터 행동 처리 Loop
         activeCharActionList.querySelectorAll('.action-row').forEach(row => {
             const id = parseInt(row.dataset.id);
             const char = characterData.find(c => c.id === id);
@@ -591,18 +582,13 @@
                 let label = "수치";
                 if(char.role === "딜러") {
                     label = "공격";
-                    // [추가] 딜러가 에너미를 공격한 경우 데미지 누적
                     if (targetTxt !== '(대상 없음)') {
                         if (!enemyDamageMap[targetTxt]) enemyDamageMap[targetTxt] = 0;
                         enemyDamageMap[targetTxt] += val;
                     }
-                } else if(char.role === "서포터") {
-                    label = "치유";
-                } else if(char.role === "탱커") {
-                    label = "방어";
-                }
+                } else if(char.role === "서포터") label = "치유";
+                else if(char.role === "탱커") label = "방어";
 
-                // 방어/치유인 경우 아군 경감값 누적
                 if ((char.role === "탱커" || char.role === "서포터") && targetTxt !== '(대상 없음)') {
                     if (!mitigationMap[targetTxt]) mitigationMap[targetTxt] = 0;
                     mitigationMap[targetTxt] += val;
@@ -612,25 +598,22 @@
             }
         });
 
-        result += "\n"; // [변경] [결산] 텍스트 제거하고 줄바꿈만
+        result += "\n";
 
-        // 3. 데미지 적용 및 잔여 체력 계산
+        // 데미지 계산 및 임시 저장
         
-        // (1) 괴수 체력 갱신 (딜러 공격 적용)
+        // 1. 괴수 피해량
         enemyData.forEach(enemy => {
             if(activeEnemyIds.has(enemy.id)) {
                 const incoming = enemyDamageMap[enemy.name] || 0;
                 if(incoming > 0) {
-                    enemy.hp -= incoming;
-                    if(enemy.hp < 0) enemy.hp = 0;
-                    // 괴수가 맞았다는 로그가 필요하다면 여기에 추가 가능
+                    pendingRoundUpdates.enemies[enemy.id] = incoming;
                 }
             }
         });
 
-        // (2) 캐릭터 체력 갱신 (괴수 공격 - 방어/치유 적용)
+        // 2. 캐릭터 피해량
         if(pendingAttacks.length > 0) {
-            // 공격받은 캐릭터별로 데미지 합산
             const damageMap = {};
             pendingAttacks.forEach(atk => {
                 if(!damageMap[atk.target]) damageMap[atk.target] = 0;
@@ -642,34 +625,64 @@
                 let finalDmg = incomingDmg - mit;
                 if(finalDmg < 0) finalDmg = 0;
 
-                // 실제 캐릭터 데이터 HP 차감
                 const char = characterData.find(c => c.name === name);
                 if(char) {
-                    char.hp -= finalDmg;
-                    if(char.hp < 0) char.hp = 0;
+                    pendingRoundUpdates.chars[char.id] = finalDmg;
                     result += `${name} -${finalDmg}\n`;
                 }
             }
         }
 
-        // 4. 잔여 체력 전체 출력
+        // 3. 라운드 결산 출력
         result += "\n라운드 결산\n";
         
-        // 활성화된 아군 체력
         characterData.forEach(c => {
             if(activeCharIds.has(c.id)) {
-                result += `${c.name}: ${c.hp}\n`;
+                const dmg = pendingRoundUpdates.chars[c.id] || 0;
+                const nextHp = Math.max(0, c.hp - dmg);
+                result += `${c.name} ${nextHp}\n`;
             }
         });
         
-        // 활성화된 적군 체력
         enemyData.forEach(e => {
             if(activeEnemyIds.has(e.id)) {
-                result += `${e.name}: ${e.hp}\n`;
+                const dmg = pendingRoundUpdates.enemies[e.id] || 0;
+                const nextHp = Math.max(0, e.hp - dmg);
+                result += `${e.name} ${nextHp}\n`;
             }
         });
 
         document.getElementById('charResultArea').value = result;
+    }
+
+    function saveRoundResult() {
+        if (!pendingRoundUpdates) {
+            alert("저장할 결과가 없습니다.");
+            return;
+        }
+
+        // 1. 캐릭터 체력 갱신
+        for (const [idStr, dmg] of Object.entries(pendingRoundUpdates.chars)) {
+            const id = parseInt(idStr);
+            const char = characterData.find(c => c.id === id);
+            if(char) char.hp = Math.max(0, char.hp - dmg);
+        }
+
+        // 2. 에너미 체력 갱신
+        for (const [id, dmg] of Object.entries(pendingRoundUpdates.enemies)) {
+            const enemy = enemyData.find(e => e.id === id);
+            if(enemy) enemy.hp = Math.max(0, enemy.hp - dmg);
+        }
+
+        // 3. 초기화 및 UI 갱신
+        pendingRoundUpdates = null;
+        pendingAttacks = [];
+        
+        renderAll();
+        
+        document.getElementById('enemyResultArea').value = "";
+        document.getElementById('charResultArea').value = "저장 완료. 다음 라운드를 진행하세요.";
+        alert("체력이 갱신되었습니다.");
     }
 
     function copyToClipboard(id) {
