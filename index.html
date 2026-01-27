@@ -290,7 +290,7 @@
     const activeEnemyIds = new Set();
     const activeCharIds = new Set();
     let pendingAttacks = []; // 에너미 공격 데이터
-    let pendingRoundUpdates = null; // 라운드 결과(HP 변동) 임시 저장
+    let pendingRoundUpdates = null; // 라운드 결과(HP) 임시 저장
 
     // --- DOM 요소 ---
     const poolDealer = document.getElementById('poolDealer');
@@ -557,10 +557,12 @@
         
         const mitigationMap = {};   
         const enemyDamageMap = {};  
+        const healingMap = {}; // 치유량 저장 맵 추가
         
-        // HP 변동 사항 임시 저장
+        // 결과 임시 저장
         pendingRoundUpdates = { chars: {}, enemies: {} };
 
+        // 1. 캐릭터 행동 수집
         activeCharActionList.querySelectorAll('.action-row').forEach(row => {
             const id = parseInt(row.dataset.id);
             const char = characterData.find(c => c.id === id);
@@ -586,12 +588,18 @@
                         if (!enemyDamageMap[targetTxt]) enemyDamageMap[targetTxt] = 0;
                         enemyDamageMap[targetTxt] += val;
                     }
-                } else if(char.role === "서포터") label = "치유";
-                else if(char.role === "탱커") label = "방어";
-
-                if ((char.role === "탱커" || char.role === "서포터") && targetTxt !== '(대상 없음)') {
-                    if (!mitigationMap[targetTxt]) mitigationMap[targetTxt] = 0;
-                    mitigationMap[targetTxt] += val;
+                } else if(char.role === "서포터") {
+                    label = "치유";
+                    if (targetTxt !== '(대상 없음)') {
+                        if (!healingMap[targetTxt]) healingMap[targetTxt] = 0;
+                        healingMap[targetTxt] += val;
+                    }
+                } else if(char.role === "탱커") {
+                    label = "방어";
+                    if (targetTxt !== '(대상 없음)') {
+                        if (!mitigationMap[targetTxt]) mitigationMap[targetTxt] = 0;
+                        mitigationMap[targetTxt] += val;
+                    }
                 }
 
                 result += `${char.name} ${label} ${val}\n`;
@@ -600,9 +608,7 @@
 
         result += "\n";
 
-        // 데미지 계산 및 임시 저장
-        
-        // 1. 괴수 피해량
+        // 2. 괴수 피해량 계산 (기존 로직 유지)
         enemyData.forEach(enemy => {
             if(activeEnemyIds.has(enemy.id)) {
                 const incoming = enemyDamageMap[enemy.name] || 0;
@@ -612,36 +618,63 @@
             }
         });
 
-        // 2. 캐릭터 피해량
-        if(pendingAttacks.length > 0) {
-            const damageMap = {};
-            pendingAttacks.forEach(atk => {
-                if(!damageMap[atk.target]) damageMap[atk.target] = 0;
-                damageMap[atk.target] += atk.val;
-            });
+        // 3. 캐릭터 피해량 및 회복 계산 (수정된 로직)
+        // 공격받지 않아도 회복을 처리하기 위해 모든 출전 캐릭터를 순회
+        
+        // (1) 먼저 들어온 공격 피해량을 맵핑
+        const incomingAttackMap = {};
+        pendingAttacks.forEach(atk => {
+            if(!incomingAttackMap[atk.target]) incomingAttackMap[atk.target] = 0;
+            incomingAttackMap[atk.target] += atk.val;
+        });
 
-            for (const [name, incomingDmg] of Object.entries(damageMap)) {
-                const mit = mitigationMap[name] || 0; 
-                let finalDmg = incomingDmg - mit;
-                if(finalDmg < 0) finalDmg = 0;
+        // (2) 각 캐릭터의 최종 상태 계산
+        activeCharIds.forEach(charId => {
+            const char = characterData.find(c => c.id === charId);
+            if (!char) return;
+            
+            const incoming = incomingAttackMap[char.name] || 0;
+            const mit = mitigationMap[char.name] || 0;
+            let heal = healingMap[char.name] || 0;
 
-                const char = characterData.find(c => c.name === name);
-                if(char) {
-                    pendingRoundUpdates.chars[char.id] = finalDmg;
-                    result += `${name} -${finalDmg}\n`;
-                }
+            // 로직: 체력이 0인 경우(사망자) 회복 불가
+            if (char.hp <= 0) {
+                heal = 0;
             }
-        }
 
-        // 3. 라운드 결산 출력
+            // 피해량 계산 (음수 방지)
+            let actualDmg = incoming - mit;
+            if (actualDmg < 0) actualDmg = 0;
+
+            // 최종 체력 계산
+            let newHp = char.hp - actualDmg + heal;
+            
+            // 체력 한계 보정 (0 ~ 1000)
+            if (newHp > 1000) newHp = 1000;
+            if (newHp < 0) newHp = 0;
+
+            // 변화가 있거나 전투에 연루된 경우 결과에 추가
+            if (incoming > 0 || heal > 0) {
+                pendingRoundUpdates.chars[char.id] = newHp; // 최종 HP를 저장
+                
+                let logStr = `${char.name}`;
+                if (actualDmg > 0) logStr += ` -${actualDmg}`;
+                else if (incoming > 0 && actualDmg === 0) logStr += ` (방어됨)`;
+                
+                if (heal > 0) logStr += ` +${heal}`;
+                
+                result += logStr + '\n';
+            }
+        });
+
+        // 4. 라운드 예상 결산 (UI 표시용)
         result += "\n라운드 결산\n";
         
-        characterData.forEach(c => {
-            if(activeCharIds.has(c.id)) {
-                const dmg = pendingRoundUpdates.chars[c.id] || 0;
-                const nextHp = Math.max(0, c.hp - dmg);
-                result += `${c.name} ${nextHp}\n`;
-            }
+        activeCharIds.forEach(id => {
+            const char = characterData.find(c => c.id === id);
+            // pendingRoundUpdates에 값이 있으면 그 값(newHp), 없으면 현재 hp
+            const finalHp = (pendingRoundUpdates.chars[id] !== undefined) ? pendingRoundUpdates.chars[id] : char.hp;
+            result += `${char.name} ${finalHp}\n`;
         });
         
         enemyData.forEach(e => {
@@ -655,34 +688,33 @@
         document.getElementById('charResultArea').value = result;
     }
 
-    // [수정] 라운드 결과 저장 (체력 0인 대상 자동 제외 포함)
     function saveRoundResult() {
         if (!pendingRoundUpdates) {
             alert("저장할 결과가 없습니다.");
             return;
         }
 
-        // 1. 캐릭터 체력 갱신 및 사망자 체크
-        for (const [idStr, dmg] of Object.entries(pendingRoundUpdates.chars)) {
+        // 1. 캐릭터 체력 갱신 (저장된 최종 HP 값을 그대로 적용)
+        for (const [idStr, newHp] of Object.entries(pendingRoundUpdates.chars)) {
             const id = parseInt(idStr);
             const char = characterData.find(c => c.id === id);
             if(char) {
-                char.hp = Math.max(0, char.hp - dmg);
+                char.hp = newHp;
                 
-                // [추가된 부분] 체력이 0 이하면 출전 목록에서 제거
+                // 체력이 0 이하면 출전 목록에서 제거
                 if (char.hp <= 0) {
                     activeCharIds.delete(id);
                 }
             }
         }
 
-        // 2. 에너미 체력 갱신 및 처치 체크
+        // 2. 에너미 체력 갱신 (기존 데미지 차감 방식 유지)
         for (const [id, dmg] of Object.entries(pendingRoundUpdates.enemies)) {
             const enemy = enemyData.find(e => e.id === id);
             if(enemy) {
                 enemy.hp = Math.max(0, enemy.hp - dmg);
                 
-                // [추가된 부분] 체력이 0 이하면 출현 목록에서 제거
+                // 체력이 0 이하면 출현 목록에서 제거
                 if (enemy.hp <= 0) {
                     activeEnemyIds.delete(id);
                 }
@@ -693,11 +725,11 @@
         pendingRoundUpdates = null;
         pendingAttacks = [];
         
-        renderAll(); // activeIds에서 삭제된 대상은 여기서 렌더링되지 않음
+        renderAll();
         
         document.getElementById('enemyResultArea').value = "";
-        document.getElementById('charResultArea').value = "저장 완료!";
-        alert("체력이 갱신되었습니다.");
+        document.getElementById('charResultArea').value = "저장 완료! 다음 라운드를 진행하세요.";
+        alert("저장 완료!");
     }
 
     function copyToClipboard(id) {
